@@ -41,7 +41,6 @@ def crear_txt(folder_path, nombre_archivo, contenido):
     except Exception as e:
         print(f'Error al crear el archivo {archivo_path}: {e}')
 
-
 def crear_carpetas():
     records = leer_datos_google_sheets()
     if not records:
@@ -81,33 +80,34 @@ def crear_carpetas():
     # Crea las carpetas y archivos .txt
     for record in registros_filtrados:
         pedido = record.get('Pedido')
-        fac_venta = record.get('FactVenta', '').replace(" ", "") 
-        fact_flete = record.get('Fact Flete', '').replace(" ", "")
+        fac_venta = record.get('FactVenta', '').replace(" ", "")  # Elimina espacios de la FactVenta
+        fact_flete = str(record.get('Fact Flete', '')).strip()
         fact_complemento = record.get('Fact Complemento', '').strip()
-        fecha_pedido = record.get('Fecha Pedido')
+        fact_compra = str(record.get('Fact Compra', '')).strip()  # Nueva línea para Fact Compra
+        fecha_fact_venta = record.get('Fecha Fact Venta')  # Usa Fecha Fact Venta
 
         # Imprime la información de pedido y facturas para depuración
-        print(f'Procesando pedido: {pedido}, FactVenta: {fac_venta}, Fact Flete: {fact_flete}, Fact Complemento: {fact_complemento}')
+        print(f'Procesando pedido: {pedido}, FactVenta: {fac_venta}, Fact Flete: {fact_flete}, Fact Complemento: {fact_complemento}, Fact Compra: {fact_compra}')
 
-        if not pedido or not fecha_pedido:
+        if not pedido or not fecha_fact_venta:
             continue
 
         # Maneja el formato de la fecha asegurando que sea una cadena
-        if isinstance(fecha_pedido, int):
-            fecha_pedido = str(fecha_pedido)  # Convierte enteros a cadena
-        elif not isinstance(fecha_pedido, str):
-            print(f"Formato de fecha no válido para el pedido {pedido}: {fecha_pedido}")
+        if isinstance(fecha_fact_venta, int):
+            fecha_fact_venta = str(fecha_fact_venta)  # Convierte enteros a cadena
+        elif not isinstance(fecha_fact_venta, str):
+            print(f"Formato de fecha no válido para el pedido {pedido}: {fecha_fact_venta}")
             continue
 
         # Intenta convertir la fecha
         try:
-            fecha_obj = datetime.strptime(fecha_pedido, "%d/%m/%Y")  # Ajustado para el formato correcto
+            fecha_obj = datetime.strptime(fecha_fact_venta, "%d/%m/%Y")  # Ajustado para el formato correcto
             mes_num = fecha_obj.strftime("%m")  # Número del mes
             mes_str = fecha_obj.strftime("%B").upper()  # Nombre completo del mes en mayúsculas
             mes_folder_name = f'{mes_num} {mes_str}'  # Formato '01 ENERO', '02 FEBRERO', etc.
             dia_str = fecha_obj.strftime("%d")  # Día con formato de dos dígitos
         except ValueError:
-            print(f"Formato de fecha inválido para el pedido {pedido}: {fecha_pedido}")
+            print(f"Formato de fecha inválido para el pedido {pedido}: {fecha_fact_venta}")
             continue
 
         # Crea la carpeta para el mes
@@ -132,13 +132,15 @@ def crear_carpetas():
             os.makedirs(pedido_folder)
             print(f'Se creó la carpeta: {pedido_folder}')
 
-        # Crea archivos .txt para FactVenta, Fact Flete, y Fact Complemento si aplican
+        # Crea archivos .txt para FactVenta, Fact Flete, Fact Complemento y Fact Compra si aplican
         if fac_venta and fac_venta.upper() != 'NA':
             crear_txt(pedido_folder, f'Venta_{fac_venta}.txt', fac_venta)
         if fact_flete and fact_flete.upper() != 'NA':
             crear_txt(pedido_folder, f'Flete_{fact_flete}.txt', fact_flete)
         if fact_complemento and fact_complemento.upper() != 'NA':
             crear_txt(pedido_folder, f'Complemento_{fact_complemento}.txt', fact_complemento)
+        if fact_compra and fact_compra.upper() != 'NA':  # Nueva condición para Fact Compra
+            crear_txt(pedido_folder, f'Compra_{fact_compra}.txt', fact_compra)
 
     messagebox.showinfo("Finalizado", f'Se han creado las carpetas y archivos desde DIS{inicio} hasta DIS{fin} en {carpeta_contenedora}')
 
