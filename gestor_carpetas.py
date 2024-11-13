@@ -1,11 +1,13 @@
 import os
 import shutil
 import tkinter as tk
-from tkinter import simpledialog, messagebox
+from tkinter import messagebox
+from tkinter import ttk
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 import locale
+import re
 
 # Configura el locale a español (esto puede variar dependiendo del sistema operativo)
 locale.setlocale(locale.LC_TIME, 'es_ES.UTF-8')  # Para sistemas Unix/Linux/Mac
@@ -30,8 +32,8 @@ def leer_datos_google_sheets():
         return []
 
 def crear_txt(folder_path, nombre_archivo, contenido):
-    if not os.path.exists(folder_path):
-        os.makedirs(folder_path)
+    # Asegúrate de que el directorio esté creado antes de intentar escribir en el archivo
+    os.makedirs(folder_path, exist_ok=True)  # Crea la ruta completa si no existe
     
     archivo_path = os.path.join(folder_path, nombre_archivo)
     try:
@@ -41,18 +43,11 @@ def crear_txt(folder_path, nombre_archivo, contenido):
     except Exception as e:
         print(f'Error al crear el archivo {archivo_path}: {e}')
 
-def crear_carpetas():
+def iniciar_creacion_carpetas(inicio, fin, root):
     records = leer_datos_google_sheets()
     if not records:
         return  # Sale si no hay registros
 
-    # Solicita al usuario el rango de inicio y fin a través de cuadros de diálogo
-    inicio = simpledialog.askinteger("Entrada", "Ingresa el número inicial del pedido:")
-    fin = simpledialog.askinteger("Entrada", "Ingresa el número final del pedido:")
-
-    if inicio is None or fin is None:
-        messagebox.showerror("Error", "Debes ingresar un rango válido.")
-        return
     if inicio > fin:
         messagebox.showerror("Error", "El número inicial debe ser menor o igual al número final.")
         return
@@ -72,17 +67,18 @@ def crear_carpetas():
     # Filtra los registros según el rango de pedidos
     registros_filtrados = [
         record for record in records
-        if isinstance(record.get('Pedido'), str) and record.get('Pedido').startswith('DIS')
-        and record.get('Pedido')[3:].split('/')[0].strip().isdigit()  # Extrae el número después de 'DIS'
-        and inicio <= int(record.get('Pedido')[3:].split('/')[0].strip()) <= fin
+        if isinstance(record.get('Pedido'), str) and re.match(r'DIS\s*\d+', record.get('Pedido'))  # Verifica que empiece con 'DIS' seguido de un número
+        and inicio <= int(re.search(r'DIS\s*(\d+)', record.get('Pedido')).group(1)) <= fin
     ]
 
     # Crea las carpetas y archivos .txt
     for record in registros_filtrados:
-        pedido = record.get('Pedido')
-        fac_venta = record.get('FactVenta', '').replace(" ", "")  # Elimina espacios de la FactVenta
+        pedido = record.get('Pedido').strip()  # Mantiene el pedido completo
+        pedido = re.sub(r'\s+', ' ', pedido)  # Elimina espacios múltiples
+        pedido = pedido.replace('/', '').replace('  ', ' ')  # Elimina '/' y dobles espacios
+        fac_venta = str(record.get('FactVenta', '')).replace(" ", "")  # Elimina espacios de la FactVenta
         fact_flete = str(record.get('Fact Flete', '')).strip()
-        fact_complemento = record.get('Fact Complemento', '').strip()
+        fact_complemento = str(record.get('Fact Complemento', '')).strip()
         fact_compra = str(record.get('Fact Compra', '')).strip()  # Nueva línea para Fact Compra
         fecha_fact_venta = record.get('Fecha Fact Venta')  # Usa Fecha Fact Venta
 
@@ -112,25 +108,15 @@ def crear_carpetas():
 
         # Crea la carpeta para el mes
         mes_folder = os.path.join(carpeta_contenedora, mes_folder_name)
-        if not os.path.exists(mes_folder):
-            os.makedirs(mes_folder)
+        os.makedirs(mes_folder, exist_ok=True)
 
         # Crea la carpeta para el día
         dia_folder = os.path.join(mes_folder, dia_str)
-        if not os.path.exists(dia_folder):
-            os.makedirs(dia_folder)
+        os.makedirs(dia_folder, exist_ok=True)
 
         # Crea la carpeta para el pedido
-        if isinstance(pedido, str) and ('/ 1' in pedido or '/ 2' in pedido):
-            pedido_base = pedido.split('/')[0].strip()
-            sufijo = pedido.split('/')[-1].strip()
-            pedido_folder = os.path.join(dia_folder, f'{pedido_base} {sufijo}')
-        else:
-            pedido_folder = os.path.join(dia_folder, f'{pedido}')
-
-        if not os.path.exists(pedido_folder):
-            os.makedirs(pedido_folder)
-            print(f'Se creó la carpeta: {pedido_folder}')
+        pedido_folder = os.path.join(dia_folder, pedido)
+        os.makedirs(pedido_folder, exist_ok=True)
 
         # Crea archivos .txt para FactVenta, Fact Flete, Fact Complemento y Fact Compra si aplican
         if fac_venta and fac_venta.upper() != 'NA':
@@ -143,9 +129,51 @@ def crear_carpetas():
             crear_txt(pedido_folder, f'Compra_{fact_compra}.txt', fact_compra)
 
     messagebox.showinfo("Finalizado", f'Se han creado las carpetas y archivos desde DIS{inicio} hasta DIS{fin} en {carpeta_contenedora}')
+    root.destroy()  # Cierra la ventana al finalizar
 
-# Configuración de la ventana principal de tkinter
-root = tk.Tk()
-root.withdraw()  # Oculta la ventana principal
+def mostrar_interfaz():
+    root = tk.Tk()
+    root.title("Gestor de Carpetas")
+    root.geometry("600x350")  # Aumenta el tamaño de la ventana
+    root.resizable(False, False)
 
-crear_carpetas()
+    # Calcula la posición para centrar la ventana
+    window_width = 600
+    window_height = 350
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    position_top = int(screen_height/2 - window_height/2)
+    position_right = int(screen_width/2 - window_width/2)
+
+    root.geometry(f"{window_width}x{window_height}+{position_right}+{position_top}")
+
+    # Crear un "AppBar" o encabezado con fondo verde
+    header_frame = tk.Frame(root, bg="green", height=50)
+    header_frame.pack(fill=tk.X)
+    header_label = tk.Label(header_frame, text="Gestor de Carpetas", bg="green", fg="white", font=("Arial", 20))
+    header_label.pack(pady=10)
+
+    frame = ttk.Frame(root, padding=50)
+    frame.pack(expand=True, fill=tk.BOTH)
+
+    ttk.Label(frame, text="Rango inicial del pedido:", font=("Arial", 16)).grid(column=0, row=0, pady=10, padx=50, sticky=tk.W)
+    inicio_entry = ttk.Entry(frame, font=("Arial", 13))
+    inicio_entry.grid(column=1, row=0, pady=10, padx=10)
+
+    ttk.Label(frame, text="Rango final del pedido:", font=("Arial", 16)).grid(column=0, row=1, pady=10, padx=50, sticky=tk.W)
+    fin_entry = ttk.Entry(frame, font=("Arial", 13))
+    fin_entry.grid(column=1, row=1, pady=10, padx=10)
+
+    def iniciar_proceso():
+        try:
+            inicio = int(inicio_entry.get())
+            fin = int(fin_entry.get())
+            iniciar_creacion_carpetas(inicio, fin, root)
+        except ValueError:
+            messagebox.showerror("Error", "Por favor, ingresa números válidos.")
+
+    ttk.Button(frame, text="Iniciar Proceso", command=iniciar_proceso).grid(column=0, row=2, columnspan=5, pady=50)
+
+    root.mainloop()
+
+mostrar_interfaz()
