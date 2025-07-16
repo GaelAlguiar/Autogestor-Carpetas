@@ -1,6 +1,7 @@
 import gc
 import os
 import re
+import zipfile
 import shutil
 import tempfile
 from flask import Flask, render_template, request, redirect, url_for, flash, send_file
@@ -39,6 +40,14 @@ def crear_txt(folder_path, nombre_archivo, contenido):
             archivo.flush()
     except Exception as e:
         print(f'Error al crear archivo {archivo_path}: {e}')
+
+def comprimir_zip(output_zip_path, folder_a_comprimir):
+    with zipfile.ZipFile(output_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for root, _, files in os.walk(folder_a_comprimir):
+            for file in files:
+                abs_path = os.path.join(root, file)
+                rel_path = os.path.relpath(abs_path, folder_a_comprimir)
+                zipf.write(abs_path, arcname=rel_path)
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
@@ -109,14 +118,14 @@ def index():
                         escribir_factura("Complemento", record.get('Fact Complemento', ''))
                         escribir_factura("Compra", record.get('Fact Compra', ''))
 
-                    # Liberar recursos después del lote
-                    gc.collect()
+                    gc.collect()  # Liberar memoria tras cada lote
 
-                    zip_base = os.path.join(temp_dir, 'carpetas')  # sin .zip
-                    zip_path = shutil.make_archive(zip_base, 'zip', carpeta_contenedora)
+                # Comprimir carpeta (compatible con macOS)
+                zip_path = os.path.join(temp_dir, 'carpetas.zip')
+                comprimir_zip(zip_path, carpeta_contenedora)
 
-                    if not os.path.exists(zip_path) or os.path.getsize(zip_path) == 0:
-                     flash("El archivo ZIP está vacío o corrupto.", "danger")
+                if not os.path.exists(zip_path) or os.path.getsize(zip_path) == 0:
+                    flash("El archivo ZIP está vacío o corrupto.", "danger")
                     return redirect(url_for('index'))
 
                 return send_file(zip_path, as_attachment=True, download_name="carpetas.zip")
