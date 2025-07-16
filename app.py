@@ -112,10 +112,13 @@ def index():
                     # Liberar recursos después del lote
                     gc.collect()
 
-                zip_output_path = os.path.join(temp_dir, 'carpetas.zip')
-                shutil.make_archive(zip_output_path.replace('.zip', ''), 'zip', carpeta_contenedora)
+                    zip_base_path = os.path.join(temp_dir, 'carpetas')
+                    zip_final_path = zip_base_path + '.zip'
+                    shutil.make_archive(zip_base_path, 'zip', carpeta_contenedora)
 
-                return send_file(zip_output_path, as_attachment=True, download_name="carpetas.zip")
+
+                return send_file(zip_final_path, as_attachment=True, download_name="carpetas.zip")
+
 
         except ValueError:
             flash("Por favor ingresa números válidos.", "danger")
