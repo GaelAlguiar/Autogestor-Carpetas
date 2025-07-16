@@ -98,15 +98,6 @@ def index():
                     except Exception:
                         continue
 
-
-                    try:
-                        fecha_obj = datetime.strptime(fecha_fact_venta, "%d/%m/%Y")
-                        mes_nombre = MESES_ES[fecha_obj.month - 1]
-                        mes_folder_name = f"{fecha_obj.strftime('%m')} {mes_nombre}"
-                        dia_str = fecha_obj.strftime("%d")
-                    except ValueError:
-                        continue
-
                     pedido_folder = os.path.join(carpeta_contenedora, mes_folder_name, dia_str, pedido)
                     os.makedirs(pedido_folder, exist_ok=True)
 
