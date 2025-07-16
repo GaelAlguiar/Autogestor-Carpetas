@@ -84,10 +84,20 @@ def index():
                     fact_flete = str(record.get('Fact Flete', '')).strip()
                     fact_complemento = str(record.get('Fact Complemento', '')).strip()
                     fact_compra = str(record.get('Fact Compra', '')).strip()
-                    fecha_fact_venta = record.get('Fecha Fact Venta', '')
+                    fecha_fact_venta = record.get('Fecha Fact Venta', '').strip()
 
-                    if not fecha_fact_venta:
+                    # Validar que tenga un patrón de fecha válido antes de parsear
+                    if not re.match(r'^\d{1,2}/\d{1,2}/\d{4}$', fecha_fact_venta):
                         continue
+
+                    try:
+                        fecha_obj = datetime.strptime(fecha_fact_venta, "%d/%m/%Y")
+                        mes_nombre = MESES_ES[fecha_obj.month - 1]
+                        mes_folder_name = f"{fecha_obj.strftime('%m')} {mes_nombre}"
+                        dia_str = fecha_obj.strftime("%d")
+                    except Exception:
+                        continue
+
 
                     try:
                         fecha_obj = datetime.strptime(fecha_fact_venta, "%d/%m/%Y")
