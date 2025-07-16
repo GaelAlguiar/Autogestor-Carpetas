@@ -112,13 +112,14 @@ def index():
                     # Liberar recursos después del lote
                     gc.collect()
 
-                    zip_base_path = os.path.join(temp_dir, 'carpetas')
-                    zip_final_path = zip_base_path + '.zip'
-                    shutil.make_archive(zip_base_path, 'zip', carpeta_contenedora)
+                    zip_base = os.path.join(temp_dir, 'carpetas')  # sin .zip
+                    zip_path = shutil.make_archive(zip_base, 'zip', carpeta_contenedora)
 
+                    if not os.path.exists(zip_path) or os.path.getsize(zip_path) == 0:
+                     flash("El archivo ZIP está vacío o corrupto.", "danger")
+                    return redirect(url_for('index'))
 
-                return send_file(zip_final_path, as_attachment=True, download_name="carpetas.zip")
-
+                return send_file(zip_path, as_attachment=True, download_name="carpetas.zip")
 
         except ValueError:
             flash("Por favor ingresa números válidos.", "danger")
