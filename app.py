@@ -1,14 +1,15 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, send_file
+import gc
 import os
+import re
+import shutil
 import tempfile
+from flask import Flask, render_template, request, redirect, url_for, flash, send_file
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
-import re
-import shutil
 
 app = Flask(__name__, static_url_path='/static', static_folder='static')
-app.secret_key = os.getenv("FLASK_SECRET_KEY")
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "clave_segura")
 
 MESES_ES = [
     "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
@@ -26,12 +27,16 @@ def leer_datos_google_sheets(json_path):
         print(f"Error al leer la hoja: {e}")
         return []
 
+def limpiar_nombre(nombre):
+    return re.sub(r'[\/:*?"<>|]', '_', str(nombre))
+
 def crear_txt(folder_path, nombre_archivo, contenido):
     os.makedirs(folder_path, exist_ok=True)
     archivo_path = os.path.join(folder_path, nombre_archivo)
     try:
         with open(archivo_path, 'w') as archivo:
             archivo.write(contenido)
+            archivo.flush()
     except Exception as e:
         print(f'Error al crear archivo {archivo_path}: {e}')
 
@@ -59,8 +64,7 @@ def index():
                 carpeta_contenedora = os.path.join(temp_dir, 'Carpetas')
                 os.makedirs(carpeta_contenedora, exist_ok=True)
 
-                # PROCESAR EN LOTES
-                BATCH_SIZE = 200
+                BATCH_SIZE = 100
                 for i in range(0, len(records), BATCH_SIZE):
                     lote = records[i:i + BATCH_SIZE]
 
@@ -70,11 +74,11 @@ def index():
                         if not pedido or not re.match(r'DIS\s*\d+', pedido):
                             continue
 
-                        num_pedido_match = re.search(r'DIS\s*(\d+)', pedido)
-                        if not num_pedido_match:
+                        match = re.search(r'DIS\s*(\d+)', pedido)
+                        if not match:
                             continue
 
-                        num_pedido = int(num_pedido_match.group(1))
+                        num_pedido = int(match.group(1))
                         if num_pedido < inicio or num_pedido > fin:
                             continue
 
@@ -85,29 +89,29 @@ def index():
                         try:
                             fecha_obj = datetime.strptime(fecha_fact_venta, "%d/%m/%Y")
                             mes_nombre = MESES_ES[fecha_obj.month - 1]
-                            mes_folder_name = f"{fecha_obj.strftime('%m')} {mes_nombre}"
-                            dia_str = fecha_obj.strftime("%d")
+                            mes_folder = f"{fecha_obj.strftime('%m')} {mes_nombre}"
+                            dia_str = fecha_obj.strftime('%d')
                         except Exception:
                             continue
 
-                        pedido_folder = os.path.join(carpeta_contenedora, mes_folder_name, dia_str, pedido)
+                        pedido_folder = os.path.join(
+                            carpeta_contenedora, mes_folder, dia_str, limpiar_nombre(pedido)
+                        )
                         os.makedirs(pedido_folder, exist_ok=True)
 
-                        fac_venta = str(record.get('FactVenta', '')).replace(" ", "")
-                        fact_flete = str(record.get('Fact Flete', '')).strip()
-                        fact_complemento = str(record.get('Fact Complemento', '')).strip()
-                        fact_compra = str(record.get('Fact Compra', '')).strip()
+                        def escribir_factura(tipo, valor):
+                            if valor and valor.upper() != 'NA':
+                                nombre = f"{tipo}_{limpiar_nombre(valor)}.txt"
+                                crear_txt(pedido_folder, nombre, valor)
 
-                        if fac_venta and fac_venta.upper() != 'NA':
-                            crear_txt(pedido_folder, f'Venta_{fac_venta}.txt', fac_venta)
-                        if fact_flete and fact_flete.upper() != 'NA':
-                            crear_txt(pedido_folder, f'Flete_{fact_flete}.txt', fact_flete)
-                        if fact_complemento and fact_complemento.upper() != 'NA':
-                            crear_txt(pedido_folder, f'Complemento_{fact_complemento}.txt', fact_complemento)
-                        if fact_compra and fact_compra.upper() != 'NA':
-                            crear_txt(pedido_folder, f'Compra_{fact_compra}.txt', fact_compra)
+                        escribir_factura("Venta", record.get('FactVenta', '').replace(" ", ""))
+                        escribir_factura("Flete", record.get('Fact Flete', ''))
+                        escribir_factura("Complemento", record.get('Fact Complemento', ''))
+                        escribir_factura("Compra", record.get('Fact Compra', ''))
 
-                # Comprimir usando shutil (más eficiente)
+                    # Liberar recursos después del lote
+                    gc.collect()
+
                 zip_output_path = os.path.join(temp_dir, 'carpetas.zip')
                 shutil.make_archive(zip_output_path.replace('.zip', ''), 'zip', carpeta_contenedora)
 
@@ -115,10 +119,9 @@ def index():
 
         except ValueError:
             flash("Por favor ingresa números válidos.", "danger")
-            return redirect(url_for('index'))
         except Exception as e:
             flash(f"Ocurrió un error: {str(e)}", "danger")
-            return redirect(url_for('index'))
+        return redirect(url_for('index'))
 
     return render_template('index.html')
 
