@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: gestor-carpetas
+    runtime: python
+    buildCommand: ""
+    startCommand: gunicorn app:app
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: FLASK_SECRET_KEY
+        value: clave_segura
