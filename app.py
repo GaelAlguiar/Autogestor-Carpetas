@@ -42,7 +42,7 @@ def crear_txt(folder_path, nombre_archivo, contenido):
         print(f'Error al crear archivo {archivo_path}: {e}')
 
 def comprimir_zip(output_zip_path, folder_a_comprimir):
-    with zipfile.ZipFile(output_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+    with zipfile.ZipFile(output_zip_path, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as zipf:
         for root, _, files in os.walk(folder_a_comprimir):
             for file in files:
                 abs_path = os.path.join(root, file)
