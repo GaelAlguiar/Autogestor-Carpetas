@@ -4,16 +4,17 @@ import tempfile
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
-import locale
 import re
 import zipfile
 
-# Configura localización en español para fechas
-locale.setlocale(locale.LC_TIME, 'es_ES.UTF-8')
-
 app = Flask(__name__, static_url_path='/static', static_folder='static')
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "clave_segura")
+app.secret_key = os.getenv("FLASK_SECRET_KEY")
 
+# Lista manual de meses en español (mayúsculas)
+MESES_ES = [
+    "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
+    "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"
+]
 
 def leer_datos_google_sheets(json_path):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -90,7 +91,8 @@ def index():
 
                     try:
                         fecha_obj = datetime.strptime(fecha_fact_venta, "%d/%m/%Y")
-                        mes_folder_name = fecha_obj.strftime("%m %B").upper()
+                        mes_nombre = MESES_ES[fecha_obj.month - 1]
+                        mes_folder_name = f"{fecha_obj.strftime('%m')} {mes_nombre}"
                         dia_str = fecha_obj.strftime("%d")
                     except ValueError:
                         continue
