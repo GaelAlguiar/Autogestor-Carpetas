@@ -7,11 +7,9 @@ from datetime import datetime
 import re
 import shutil
 import traceback
-import zipfile
 
 app = Flask(__name__, static_url_path='/static', static_folder='static')
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "default-secret")
-
 
 def leer_datos_google_sheets(json_path):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -24,8 +22,11 @@ def leer_datos_google_sheets(json_path):
         print(f"Error al leer la hoja: {e}")
         return []
 
-
 def copiar_factura_si_existe(origen_dir, destino_dir, numero_factura):
+    """
+    Copia archivos .pdf o .xml cuyo nombre contenga EXACTAMENTE el número de factura.
+    Retorna la cantidad de archivos copiados.
+    """
     copiados = 0
     if not numero_factura:
         return 0
@@ -41,6 +42,7 @@ def copiar_factura_si_existe(origen_dir, destino_dir, numero_factura):
             if not file.lower().endswith(('.pdf', '.xml')):
                 continue
             nombre_base = os.path.splitext(file)[0]
+            # Coincidencia exacta solo si el número está aislado (delimitado por no dígitos o al inicio/final)
             if re.search(rf'(?<!\d){re.escape(numero_limpio)}(?!\d)', nombre_base):
                 shutil.copy(os.path.join(root, file), os.path.join(destino_dir, file))
                 print(f"✅ Copiado exacto: {file}")
@@ -48,8 +50,10 @@ def copiar_factura_si_existe(origen_dir, destino_dir, numero_factura):
 
     return copiados
 
-
 def crear_txt(destino_dir, prefijo, contenido):
+    """
+    Crea un archivo .txt con el número de factura como contenido si la factura existe.
+    """
     if contenido and contenido.upper() != 'NA':
         os.makedirs(destino_dir, exist_ok=True)
         numero = ''.join(filter(str.isdigit, contenido))
@@ -58,17 +62,6 @@ def crear_txt(destino_dir, prefijo, contenido):
         with open(ruta, 'w', encoding='utf-8') as f:
             f.write(contenido)
         print(f"📄 TXT creado: {ruta}")
-
-
-def zip_dir_completo(origen, destino_zip):
-    with zipfile.ZipFile(destino_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for foldername, _, filenames in os.walk(origen):
-            for filename in filenames:
-                file_path = os.path.join(foldername, filename)
-                arcname = os.path.relpath(file_path, origen)
-                zipf.write(file_path, arcname)
-    print(f"🎯 ZIP generado: {destino_zip}")
-
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
@@ -125,25 +118,26 @@ def index():
                     ruta_ventas = os.path.join(base_path, 'VENTAS', year, mes, dia)
                     ruta_myf = os.path.join(base_path, 'MOLECULAS Y FLETES', year, mes)
 
-                    if fac_venta:
+                    # 1. Buscar archivos reales. Si no hay, crear el .txt
+                    if fac_venta and fac_venta.upper() != 'NA':
                         copiados = copiar_factura_si_existe(ruta_ventas, pedido_folder, fac_venta)
                         total_archivos_copiados += copiados
                         if copiados == 0:
                             crear_txt(pedido_folder, "venta", fac_venta)
 
-                    if fact_flete:
+                    if fact_flete and fact_flete.upper() != 'NA':
                         copiados = copiar_factura_si_existe(ruta_myf, pedido_folder, fact_flete)
                         total_archivos_copiados += copiados
                         if copiados == 0:
                             crear_txt(pedido_folder, "flete", fact_flete)
 
-                    if fact_complemento:
+                    if fact_complemento and fact_complemento.upper() != 'NA':
                         copiados = copiar_factura_si_existe(ruta_myf, pedido_folder, fact_complemento)
                         total_archivos_copiados += copiados
                         if copiados == 0:
                             crear_txt(pedido_folder, "complemento", fact_complemento)
 
-                    if fact_compra:
+                    if fact_compra and fact_compra.upper() != 'NA':
                         copiados = copiar_factura_si_existe(ruta_myf, pedido_folder, fact_compra)
                         total_archivos_copiados += copiados
                         if copiados == 0:
@@ -154,10 +148,8 @@ def index():
                 else:
                     flash(f"Se copiaron {total_archivos_copiados} archivos correctamente.", "success")
 
-                # ZIP manual para compatibilidad universal
-                zip_path = os.path.join(temp_dir, 'carpetas.zip')
-                zip_dir_completo(carpeta_contenedora, zip_path)
-
+                zip_base = os.path.join(temp_dir, 'carpetas')
+                zip_path = shutil.make_archive(zip_base, 'zip', carpeta_contenedora)
                 return send_file(zip_path, as_attachment=True, download_name="carpetas.zip")
 
         except Exception as e:
@@ -166,7 +158,6 @@ def index():
             return redirect(url_for('index'))
 
     return render_template('index.html')
-
 
 if __name__ == '__main__':
     app.run(debug=True)
