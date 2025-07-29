@@ -7,9 +7,11 @@ from datetime import datetime
 import re
 import shutil
 import traceback
+import zipfile
 
 app = Flask(__name__, static_url_path='/static', static_folder='static')
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "default-secret")
+
 
 def leer_datos_google_sheets(json_path):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -22,11 +24,8 @@ def leer_datos_google_sheets(json_path):
         print(f"Error al leer la hoja: {e}")
         return []
 
+
 def copiar_factura_si_existe(origen_dir, destino_dir, numero_factura):
-    """
-    Copia archivos .pdf o .xml cuyo nombre contenga EXACTAMENTE el número de factura.
-    Retorna la cantidad de archivos copiados.
-    """
     copiados = 0
     if not numero_factura:
         return 0
@@ -42,7 +41,6 @@ def copiar_factura_si_existe(origen_dir, destino_dir, numero_factura):
             if not file.lower().endswith(('.pdf', '.xml')):
                 continue
             nombre_base = os.path.splitext(file)[0]
-            # Coincidencia exacta solo si el número está aislado (delimitado por no dígitos o al inicio/final)
             if re.search(rf'(?<!\d){re.escape(numero_limpio)}(?!\d)', nombre_base):
                 shutil.copy(os.path.join(root, file), os.path.join(destino_dir, file))
                 print(f"✅ Copiado exacto: {file}")
@@ -50,10 +48,8 @@ def copiar_factura_si_existe(origen_dir, destino_dir, numero_factura):
 
     return copiados
 
+
 def crear_txt(destino_dir, prefijo, contenido):
-    """
-    Crea un archivo .txt con el número de factura como contenido si la factura existe.
-    """
     if contenido and contenido.upper() != 'NA':
         os.makedirs(destino_dir, exist_ok=True)
         numero = ''.join(filter(str.isdigit, contenido))
@@ -62,6 +58,7 @@ def crear_txt(destino_dir, prefijo, contenido):
         with open(ruta, 'w', encoding='utf-8') as f:
             f.write(contenido)
         print(f"📄 TXT creado: {ruta}")
+
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
@@ -118,7 +115,6 @@ def index():
                     ruta_ventas = os.path.join(base_path, 'VENTAS', year, mes, dia)
                     ruta_myf = os.path.join(base_path, 'MOLECULAS Y FLETES', year, mes)
 
-                    # 1. Buscar archivos reales. Si no hay, crear el .txt
                     if fac_venta and fac_venta.upper() != 'NA':
                         copiados = copiar_factura_si_existe(ruta_ventas, pedido_folder, fac_venta)
                         total_archivos_copiados += copiados
@@ -148,9 +144,23 @@ def index():
                 else:
                     flash(f"Se copiaron {total_archivos_copiados} archivos correctamente.", "success")
 
-                zip_base = os.path.join(temp_dir, 'carpetas')
-                zip_path = shutil.make_archive(zip_base, 'zip', carpeta_contenedora)
-                return send_file(zip_path, as_attachment=True, download_name="carpetas.zip")
+                # 🔁 Generar ZIP manualmente para evitar fallos en entornos cloud
+                fecha_str = datetime.today().strftime('%Y-%m-%d')
+                zip_filename = f"ENEREY_DIS{inicio}-{fin}_{fecha_str}.zip"
+                zip_path = os.path.join(temp_dir, zip_filename)
+
+                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    for root, _, files in os.walk(carpeta_contenedora):
+                        for file in files:
+                            abs_path = os.path.join(root, file)
+                            rel_path = os.path.relpath(abs_path, carpeta_contenedora)
+                            zipf.write(abs_path, rel_path)
+
+                if not os.path.exists(zip_path):
+                    flash("Error al generar el archivo ZIP.", "danger")
+                    return redirect(url_for('index'))
+
+                return send_file(zip_path, as_attachment=True, download_name=zip_filename)
 
         except Exception as e:
             traceback.print_exc()
@@ -158,6 +168,7 @@ def index():
             return redirect(url_for('index'))
 
     return render_template('index.html')
+
 
 if __name__ == '__main__':
     app.run(debug=True)
