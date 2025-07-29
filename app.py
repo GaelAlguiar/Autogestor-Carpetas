@@ -12,7 +12,6 @@ import zipfile
 app = Flask(__name__, static_url_path='/static', static_folder='static')
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "default-secret")
 
-
 def leer_datos_google_sheets(json_path):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds = ServiceAccountCredentials.from_json_keyfile_name(json_path, scope)
@@ -23,7 +22,6 @@ def leer_datos_google_sheets(json_path):
     except Exception as e:
         print(f"Error al leer la hoja: {e}")
         return []
-
 
 def copiar_factura_si_existe(origen_dir, destino_dir, numero_factura):
     copiados = 0
@@ -41,14 +39,12 @@ def copiar_factura_si_existe(origen_dir, destino_dir, numero_factura):
             if not file.lower().endswith(('.pdf', '.xml')):
                 continue
             nombre_base = os.path.splitext(file)[0]
-            # Coincidencia exacta (número aislado)
-            if re.search(rf'(^|[^0-9]){re.escape(numero_limpio)}([^0-9]|$)', nombre_base):
+            if re.search(rf'(?<!\d){re.escape(numero_limpio)}(?!\d)', nombre_base):
                 shutil.copy(os.path.join(root, file), os.path.join(destino_dir, file))
                 print(f"✅ Copiado exacto: {file}")
                 copiados += 1
 
     return copiados
-
 
 def crear_txt(destino_dir, prefijo, contenido):
     if contenido and contenido.upper() != 'NA':
@@ -60,7 +56,6 @@ def crear_txt(destino_dir, prefijo, contenido):
             f.write(contenido)
         print(f"📄 TXT creado: {ruta}")
 
-
 @app.route('/', methods=['GET', 'POST'])
 def index():
     if request.method == 'POST':
@@ -71,10 +66,9 @@ def index():
             base_path = request.form['ruta_base'].strip()
             file = request.files.get('credenciales')
 
-            if not file or file.filename == '':
-                return "Falta el archivo de credenciales.", 400
-            if not os.path.exists(base_path):
-                return f"La ruta base no existe o no está montada: {base_path}", 400
+            if not file or file.filename == '' or not os.path.exists(base_path):
+                flash("Debe subir el archivo de credenciales y una ruta válida.", "danger")
+                return redirect(url_for('index'))
 
             with tempfile.TemporaryDirectory() as temp_dir:
                 cred_path = os.path.join(temp_dir, 'credenciales.json')
@@ -82,7 +76,8 @@ def index():
 
                 records = leer_datos_google_sheets(cred_path)
                 if not records:
-                    return "No se pudieron leer datos de Google Sheets.", 400
+                    flash("No se pudieron leer datos de Google Sheets.", "danger")
+                    return redirect(url_for('index'))
 
                 carpeta_contenedora = os.path.join(temp_dir, 'Carpetas')
                 os.makedirs(carpeta_contenedora, exist_ok=True)
@@ -140,7 +135,11 @@ def index():
                         if copiados == 0:
                             crear_txt(pedido_folder, "compra", fact_compra)
 
-                # Generar ZIP correctamente y con nombre personalizado
+                if total_archivos_copiados == 0:
+                    flash("No se encontraron archivos PDF/XML exactos para copiar. Solo se generaron los .txt.", "warning")
+                else:
+                    flash(f"Se copiaron {total_archivos_copiados} archivos correctamente.", "success")
+
                 fecha_str = datetime.today().strftime('%Y-%m-%d')
                 zip_name = f"ENEREY_DIS{inicio}-{fin}_{fecha_str}.zip"
                 zip_path = os.path.join(temp_dir, zip_name)
@@ -156,10 +155,10 @@ def index():
 
         except Exception as e:
             traceback.print_exc()
-            return f"Ocurrió un error: {str(e)}", 500
+            flash(f"Ocurrió un error: {str(e)}", "danger")
+            return redirect(url_for('index'))
 
     return render_template('index.html')
-
 
 if __name__ == '__main__':
     app.run(debug=True)
