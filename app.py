@@ -11,11 +11,6 @@ import traceback
 app = Flask(__name__, static_url_path='/static', static_folder='static')
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "default-secret")
 
-MESES_ES = [
-    "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
-    "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"
-]
-
 def leer_datos_google_sheets(json_path):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds = ServiceAccountCredentials.from_json_keyfile_name(json_path, scope)
@@ -26,22 +21,47 @@ def leer_datos_google_sheets(json_path):
     except Exception as e:
         print(f"Error al leer la hoja: {e}")
         return []
-def copiar_archivos_factura(origen_dir, destino_dir, folio):
-    folio_limpio = ''.join(filter(str.isdigit, folio))
-    print(f"🔍 Buscando archivos con folio '{folio}' (limpio: '{folio_limpio}') en: {origen_dir}")
-    
+
+def copiar_factura_si_existe(origen_dir, destino_dir, numero_factura):
+    """
+    Copia archivos .pdf o .xml cuyo nombre contenga EXACTAMENTE el número de factura.
+    Retorna la cantidad de archivos copiados.
+    """
+    copiados = 0
+    if not numero_factura:
+        return 0
+
+    numero_limpio = ''.join(filter(str.isdigit, numero_factura))
+
     if not os.path.exists(origen_dir):
-        print("⚠️ Ruta no existe:", origen_dir)
-        return
+        print(f"⚠️ Ruta no encontrada: {origen_dir}")
+        return 0
 
     for root, _, files in os.walk(origen_dir):
-        for f in files:
-            if f.endswith(('.pdf', '.xml')) and folio_limpio in f:
-                origen = os.path.join(root, f)
-                destino = os.path.join(destino_dir, f)
-                shutil.copy(origen, destino)
-                print(f"✅ Copiado: {origen} → {destino}")
+        for file in files:
+            if not file.lower().endswith(('.pdf', '.xml')):
+                continue
+            nombre_base = os.path.splitext(file)[0]
+            # Coincidencia exacta solo si el número está aislado (delimitado por no dígitos o al inicio/final)
+            if re.search(rf'(?<!\d){re.escape(numero_limpio)}(?!\d)', nombre_base):
+                shutil.copy(os.path.join(root, file), os.path.join(destino_dir, file))
+                print(f"✅ Copiado exacto: {file}")
+                copiados += 1
 
+    return copiados
+
+def crear_txt(destino_dir, prefijo, contenido):
+    """
+    Crea un archivo .txt con el número de factura como contenido si la factura existe.
+    """
+    if contenido and contenido.upper() != 'NA':
+        os.makedirs(destino_dir, exist_ok=True)
+        numero = ''.join(filter(str.isdigit, contenido))
+        nombre = f"{prefijo.capitalize()}_{numero}.txt"
+        ruta = os.path.join(destino_dir, nombre)
+        with open(ruta, 'w', encoding='utf-8') as f:
+            f.write(contenido)
+        print(f"📄 TXT creado: {ruta}")
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
@@ -50,11 +70,9 @@ def index():
             inicio = int(request.form['inicio'])
             fin = int(request.form['fin'])
             year = request.form.get('year', '2025')
-            mes = request.form.get('mes', '')  # por compatibilidad futura
             base_path = request.form['ruta_base'].strip()
             file = request.files.get('credenciales')
 
-            print("📂 Ruta base:", base_path)
             if not file or file.filename == '' or not os.path.exists(base_path):
                 flash("Debe subir el archivo de credenciales y una ruta válida.", "danger")
                 return redirect(url_for('index'))
@@ -70,18 +88,18 @@ def index():
 
                 carpeta_contenedora = os.path.join(temp_dir, 'Carpetas')
                 os.makedirs(carpeta_contenedora, exist_ok=True)
-
-                archivos_copiados = 0
+                total_archivos_copiados = 0
 
                 for record in records:
                     pedido = record.get('Pedido', '').strip()
                     if not pedido or not re.match(r'DIS\s*\d+', pedido):
                         continue
+
                     num_pedido = int(re.search(r'DIS\s*(\d+)', pedido).group(1))
                     if num_pedido < inicio or num_pedido > fin:
                         continue
 
-                    fac_venta = str(record.get('FactVenta', '')).replace(" ", "")
+                    fac_venta = str(record.get('FactVenta', '')).strip()
                     fact_flete = str(record.get('Fact Flete', '')).strip()
                     fact_complemento = str(record.get('Fact Complemento', '')).strip()
                     fact_compra = str(record.get('Fact Compra', '')).strip()
@@ -91,37 +109,47 @@ def index():
                         continue
 
                     fecha_obj = datetime.strptime(fecha_fact_venta, "%d/%m/%Y")
-                    mes_nombre = MESES_ES[fecha_obj.month - 1]
-                    mes_folder_name = f"{fecha_obj.strftime('%m')} {mes_nombre}"  # esto está bien
-                    dia_str = fecha_obj.strftime("%d")
+                    mes = fecha_obj.strftime("%m")
+                    dia = fecha_obj.strftime("%d")
 
-                    pedido_folder = os.path.join(carpeta_contenedora, year, mes_folder_name, dia_str, pedido)
+                    pedido_folder = os.path.join(carpeta_contenedora, year, mes, dia, pedido)
                     os.makedirs(pedido_folder, exist_ok=True)
-                    
-                    ruta_ventas = os.path.join(base_path, 'VENTAS', year, mes_folder_name)
-                    ruta_myf = os.path.join(base_path, 'MOLECULAS Y FLETES', year, mes_folder_name, dia_str)
 
+                    ruta_ventas = os.path.join(base_path, 'VENTAS', year, mes, dia)
+                    ruta_myf = os.path.join(base_path, 'MOLECULAS Y FLETES', year, mes)
 
+                    # 1. Buscar archivos reales. Si no hay, crear el .txt
                     if fac_venta and fac_venta.upper() != 'NA':
-                        copiar_archivos_factura(ruta_ventas, pedido_folder, fac_venta)
-                        archivos_copiados += 1
+                        copiados = copiar_factura_si_existe(ruta_ventas, pedido_folder, fac_venta)
+                        total_archivos_copiados += copiados
+                        if copiados == 0:
+                            crear_txt(pedido_folder, "venta", fac_venta)
+
                     if fact_flete and fact_flete.upper() != 'NA':
-                        copiar_archivos_factura(ruta_myf, pedido_folder, fact_flete)
-                        archivos_copiados += 1
+                        copiados = copiar_factura_si_existe(ruta_myf, pedido_folder, fact_flete)
+                        total_archivos_copiados += copiados
+                        if copiados == 0:
+                            crear_txt(pedido_folder, "flete", fact_flete)
+
                     if fact_complemento and fact_complemento.upper() != 'NA':
-                        copiar_archivos_factura(ruta_myf, pedido_folder, fact_complemento)
-                        archivos_copiados += 1
+                        copiados = copiar_factura_si_existe(ruta_myf, pedido_folder, fact_complemento)
+                        total_archivos_copiados += copiados
+                        if copiados == 0:
+                            crear_txt(pedido_folder, "complemento", fact_complemento)
+
                     if fact_compra and fact_compra.upper() != 'NA':
-                        copiar_archivos_factura(ruta_myf, pedido_folder, fact_compra)
-                        archivos_copiados += 1
+                        copiados = copiar_factura_si_existe(ruta_myf, pedido_folder, fact_compra)
+                        total_archivos_copiados += copiados
+                        if copiados == 0:
+                            crear_txt(pedido_folder, "compra", fact_compra)
 
-                if archivos_copiados == 0:
-                    flash("No se encontraron archivos para copiar en el rango especificado.", "warning")
-                    return redirect(url_for('index'))
+                if total_archivos_copiados == 0:
+                    flash("No se encontraron archivos PDF/XML exactos para copiar. Solo se generaron los .txt.", "warning")
+                else:
+                    flash(f"Se copiaron {total_archivos_copiados} archivos correctamente.", "success")
 
-                zip_path = os.path.join(temp_dir, 'carpetas.zip')
-                shutil.make_archive(zip_path.replace('.zip', ''), 'zip', carpeta_contenedora)
-                print("📦 ZIP generado con éxito:", zip_path)
+                zip_base = os.path.join(temp_dir, 'carpetas')
+                zip_path = shutil.make_archive(zip_base, 'zip', carpeta_contenedora)
                 return send_file(zip_path, as_attachment=True, download_name="carpetas.zip")
 
         except Exception as e:
