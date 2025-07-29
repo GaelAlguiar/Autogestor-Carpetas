@@ -12,7 +12,6 @@ import zipfile
 app = Flask(__name__, static_url_path='/static', static_folder='static')
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "default-secret")
 
-
 def leer_datos_google_sheets(json_path):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds = ServiceAccountCredentials.from_json_keyfile_name(json_path, scope)
@@ -24,14 +23,12 @@ def leer_datos_google_sheets(json_path):
         print(f"Error al leer la hoja: {e}")
         return []
 
-
 def copiar_factura_si_existe(origen_dir, destino_dir, numero_factura):
     copiados = 0
     if not numero_factura:
         return 0
 
     numero_limpio = ''.join(filter(str.isdigit, numero_factura))
-
     if not os.path.exists(origen_dir):
         print(f"⚠️ Ruta no encontrada: {origen_dir}")
         return 0
@@ -45,9 +42,7 @@ def copiar_factura_si_existe(origen_dir, destino_dir, numero_factura):
                 shutil.copy(os.path.join(root, file), os.path.join(destino_dir, file))
                 print(f"✅ Copiado exacto: {file}")
                 copiados += 1
-
     return copiados
-
 
 def crear_txt(destino_dir, prefijo, contenido):
     if contenido and contenido.upper() != 'NA':
@@ -58,7 +53,6 @@ def crear_txt(destino_dir, prefijo, contenido):
         with open(ruta, 'w', encoding='utf-8') as f:
             f.write(contenido)
         print(f"📄 TXT creado: {ruta}")
-
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
@@ -144,23 +138,28 @@ def index():
                 else:
                     flash(f"Se copiaron {total_archivos_copiados} archivos correctamente.", "success")
 
-                # 🔁 Generar ZIP manualmente para evitar fallos en entornos cloud
-                fecha_str = datetime.today().strftime('%Y-%m-%d')
+                fecha_str = datetime.now().strftime('%Y%m%d_%H%M%S')
                 zip_filename = f"ENEREY_DIS{inicio}-{fin}_{fecha_str}.zip"
                 zip_path = os.path.join(temp_dir, zip_filename)
 
-                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                    for root, _, files in os.walk(carpeta_contenedora):
-                        for file in files:
-                            abs_path = os.path.join(root, file)
-                            rel_path = os.path.relpath(abs_path, carpeta_contenedora)
-                            zipf.write(abs_path, rel_path)
-
-                if not os.path.exists(zip_path):
-                    flash("Error al generar el archivo ZIP.", "danger")
+                try:
+                    with zipfile.ZipFile(zip_path, 'w', compression=zipfile.ZIP_DEFLATED) as zipf:
+                        for root, _, files in os.walk(carpeta_contenedora):
+                            for file in files:
+                                abs_path = os.path.join(root, file)
+                                rel_path = os.path.relpath(abs_path, carpeta_contenedora)
+                                zipf.write(abs_path, rel_path)
+                    print(f"✅ ZIP creado correctamente: {zip_path}")
+                except Exception as zip_error:
+                    print(f"❌ Error creando el zip: {zip_error}")
+                    flash("Hubo un problema generando el ZIP.", "danger")
                     return redirect(url_for('index'))
 
-                return send_file(zip_path, as_attachment=True, download_name=zip_filename)
+                if not os.path.exists(zip_path) or os.path.getsize(zip_path) < 100:
+                    flash("El archivo ZIP no se generó correctamente o está vacío.", "danger")
+                    return redirect(url_for('index'))
+
+                return send_file(zip_path, mimetype='application/zip', as_attachment=True, download_name=zip_filename)
 
         except Exception as e:
             traceback.print_exc()
@@ -168,7 +167,6 @@ def index():
             return redirect(url_for('index'))
 
     return render_template('index.html')
-
 
 if __name__ == '__main__':
     app.run(debug=True)
